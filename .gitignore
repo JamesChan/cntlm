@@ -1,0 +1,4 @@
+*.o
+cntlm
+config
+configure-stamp
