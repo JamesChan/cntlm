@@ -20,16 +20,16 @@ OSLDFLAGS	:= $(shell [ $(OS) = "SunOS" ] && echo "-lrt -lsocket -lnsl")
 LDFLAGS		:= -lpthread $(OSLDFLAGS)
 CYGWIN_REQS	:= cygwin1.dll cyggcc_s-1.dll cygstdc++-6.dll cygrunsrv.exe 
 
+CFLAGS	+= -std=c99 -D__BSD_VISIBLE -D_ALL_SOURCE -D_XOPEN_SOURCE=600 -D_POSIX_C_SOURCE=200112 -D_ISOC99_SOURCE -D_REENTRANT -D_BSD_SOURCE -DVERSION=\"'$(VER)'\"
 ifeq ($(DEBUG),1)
-	CFLAGS	+= -g  -std=c99 -Wall -pedantic -D__BSD_VISIBLE -D_ALL_SOURCE -D_XOPEN_SOURCE=600 -D_POSIX_C_SOURCE=200112 -D_ISOC99_SOURCE -D_REENTRANT -D_BSD_SOURCE -DVERSION=\"'$(VER)'\"
+	CFLAGS	+= -g -Wall -pedantic
 else
-	CFLAGS	+= -O3 -std=c99 -D__BSD_VISIBLE -D_ALL_SOURCE -D_XOPEN_SOURCE=600 -D_POSIX_C_SOURCE=200112 -D_ISOC99_SOURCE -D_REENTRANT -D_BSD_SOURCE -DVERSION=\"'$(VER)'\"
+	CFLAGS	+= -O3
 endif
 
+OBJS = utils.o ntlm.o xcrypt.o config.o socket.o acl.o auth.o http.o forward.o direct.o scanner.o pages.o main.o
 ifneq ($(findstring CYGWIN,$(OS)),)
-	OBJS=utils.o ntlm.o xcrypt.o config.o socket.o acl.o auth.o http.o forward.o direct.o scanner.o pages.o main.o win/resources.o
-else
-	OBJS=utils.o ntlm.o xcrypt.o config.o socket.o acl.o auth.o http.o forward.o direct.o scanner.o pages.o main.o
+	OBJS += win/resources.o
 endif
 
 $(NAME): configure-stamp $(OBJS)
