@@ -2,3 +2,11 @@
 cntlm
 config
 configure-stamp
+
+
+#Added by cargo
+#
+#already existing elements are commented out
+
+/target
+**/*.rs.bk
