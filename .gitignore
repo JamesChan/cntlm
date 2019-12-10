@@ -10,3 +10,4 @@ configure-stamp
 
 /target
 **/*.rs.bk
+.DS_Store
