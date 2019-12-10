@@ -73,6 +73,11 @@ struct auth_s *g_creds = NULL;			/* throughout the whole module */
 
 void print_help(char *const *argv);
 
+void parse_config(char *tmp, char *head, const char *cpassword, const char *cpassntlm2, const char *cpassnt,
+                  const char *cpasslm, const char *cuser, const char *cdomain, const char *cworkstation,
+                  const char *cauth, hlist_t list, int gateway, const struct config_s *cf, int *i, int *cflags,
+                  plist_t *tunneld_list, plist_t *proxyd_list, plist_t *socksd_list, plist_t *rules);
+
 int quit = 0;					/* sighandler() */
 int ntlmbasic = 0;				/* forward_request() */
 int serialize = 0;
@@ -933,160 +938,10 @@ int main(int argc, char **argv) {
 	 * If any configuration file was successfully opened, parse it.
 	 */
 	if (cf) {
-		/*
-		 * Check if gateway mode is requested before actually binding any ports.
-		 */
-		tmp = new(MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "Gateway", tmp, MINIBUF_SIZE);
-		if (!strcasecmp("yes", tmp))
-			gateway = 1;
-		free(tmp);
-
-		/*
-		 * Check for NTLM-to-basic settings
-		 */
-		tmp = new(MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "NTLMToBasic", tmp, MINIBUF_SIZE);
-		if (!strcasecmp("yes", tmp))
-			ntlmbasic = 1;
-		free(tmp);
-
-		/*
-		 * Setup the rest of tunnels.
-		 */
-		while ((tmp = config_pop(cf, "Tunnel"))) {
-			tunnel_add(&tunneld_list, tmp, gateway);
-			free(tmp);
-		}
-
-		/*
-		 * Bind the rest of proxy service ports.
-		 */
-		while ((tmp = config_pop(cf, "Listen"))) {
-			listen_add("Proxy", &proxyd_list, tmp, gateway);
-			free(tmp);
-		}
-
-		/*
-		 * Bind the rest of SOCKS5 service ports.
-		 */
-		while ((tmp = config_pop(cf, "SOCKS5Proxy"))) {
-			listen_add("SOCKS5 proxy", &socksd_list, tmp, gateway);
-			free(tmp);
-		}
-
-		/*
-		 * Accept only headers not specified on the command line.
-		 * Command line has higher priority.
-		 */
-		while ((tmp = config_pop(cf, "Header"))) {
-			if (is_http_header(tmp)) {
-				head = get_http_header_name(tmp);
-				if (!hlist_in(header_list, head))
-					header_list = hlist_add(header_list, head, get_http_header_value(tmp),
-						HLIST_ALLOC, HLIST_NOALLOC);
-				free(head);
-			} else
-				syslog(LOG_ERR, "Invalid header format: %s\n", tmp);
-
-			free(tmp);
-		}
-
-		/*
-		 * Add the rest of parent proxies.
-		 */
-		while ((tmp = config_pop(cf, "Proxy"))) {
-			parent_add(tmp, 0);
-			free(tmp);
-		}
-
-		/*
-		 * No ACLs on the command line? Use config file.
-		 */
-		if (rules == NULL) {
-			list = cf->options;
-			while (list) {
-				if (!(i=strcasecmp("Allow", list->key)) || !strcasecmp("Deny", list->key))
-					if (!acl_add(&rules, list->value, i ? ACL_DENY : ACL_ALLOW))
-						myexit(1);
-				list = list->next;
-			}
-
-			while ((tmp = config_pop(cf, "Allow")))
-				free(tmp);
-			while ((tmp = config_pop(cf, "Deny")))
-				free(tmp);
-		}
-
-		/*
-		 * Single options.
-		 */
-		CFG_DEFAULT(cf, "Auth", cauth, MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "Domain", cdomain, MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "Password", cpassword, MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "PassNTLMv2", cpassntlm2, MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "PassNT", cpassnt, MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "PassLM", cpasslm, MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "Username", cuser, MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "Workstation", cworkstation, MINIBUF_SIZE);
-
-		tmp = new(MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "Flags", tmp, MINIBUF_SIZE);
-		if (!cflags)
-			cflags = swap32(strtoul(tmp, NULL, 0));
-		free(tmp);
-
-		tmp = new(MINIBUF_SIZE);
-		CFG_DEFAULT(cf, "ISAScannerSize", tmp, MINIBUF_SIZE);
-		if (!scanner_plugin_maxsize && strlen(tmp)) {
-			scanner_plugin = 1;
-			scanner_plugin_maxsize = atoi(tmp);
-		}
-		free(tmp);
-
-		while ((tmp = config_pop(cf, "NoProxy"))) {
-			if (strlen(tmp)) {
-				noproxy_list = noproxy_add(noproxy_list, tmp);
-			}
-			free(tmp);
-		}
-
-		while ((tmp = config_pop(cf, "SOCKS5Users"))) {
-			head = strchr(tmp, ':');
-			if (!head) {
-				syslog(LOG_ERR, "Invalid username:password format for SOCKS5User: %s\n", tmp);
-			} else {
-				head[0] = 0;
-				users_list = hlist_add(users_list, tmp, head+1, HLIST_ALLOC, HLIST_ALLOC);
-			}
-		}
-					
-
-		/*
-		 * Add User-Agent matching patterns.
-		 */
-		while ((tmp = config_pop(cf, "ISAScannerAgent"))) {
-			scanner_plugin = 1;
-			if (!scanner_plugin_maxsize)
-				scanner_plugin_maxsize = 1;
-
-			if ((i = strlen(tmp))) {
-				head = new(i + 3);
-				snprintf(head, i+3, "*%s*", tmp);
-				scanner_agent_list = plist_add(scanner_agent_list, 0, head);
-			}
-			free(tmp);
-		}
-
-		/*
-		 * Print out unused/unknown options.
-		 */
-		list = cf->options;
-		while (list) {
-			syslog(LOG_INFO, "Ignoring config file option: %s\n", list->key);
-			list = list->next;
-		}
-	}
+        parse_config(tmp, head, cpassword, cpassntlm2, cpassnt, cpasslm, cuser, cdomain, cworkstation, cauth, list,
+                     gateway, cf, &i,
+                     &cflags, &tunneld_list, &proxyd_list, &socksd_list, &rules);
+    }
 
 	config_close(cf);
 
@@ -1580,6 +1435,164 @@ bailout:
 	plist_free(parent_list);
 
 	exit(0);
+}
+
+void parse_config(char *tmp, char *head, const char *cpassword, const char *cpassntlm2, const char *cpassnt,
+                  const char *cpasslm, const char *cuser, const char *cdomain, const char *cworkstation,
+                  const char *cauth, hlist_t list, int gateway, const struct config_s *cf, int *i, int *cflags,
+                  plist_t *tunneld_list, plist_t *proxyd_list, plist_t *socksd_list, plist_t *rules) {/*
+                   * Check if gateway mode is requested before actually binding any ports.
+                   */
+    tmp = new(MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "Gateway", tmp, MINIBUF_SIZE);
+    if (!strcasecmp("yes", tmp))
+        gateway = 1;
+    free(tmp);
+
+    /*
+* Check for NTLM-to-basic settings
+*/
+    tmp = new(MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "NTLMToBasic", tmp, MINIBUF_SIZE);
+    if (!strcasecmp("yes", tmp))
+        ntlmbasic = 1;
+    free(tmp);
+
+    /*
+* Setup the rest of tunnels.
+*/
+    while ((tmp = config_pop(cf, "Tunnel"))) {
+        tunnel_add(tunneld_list, tmp, gateway);
+        free(tmp);
+    }
+
+    /*
+* Bind the rest of proxy service ports.
+*/
+    while ((tmp = config_pop(cf, "Listen"))) {
+        listen_add("Proxy", proxyd_list, tmp, gateway);
+        free(tmp);
+    }
+
+    /*
+* Bind the rest of SOCKS5 service ports.
+*/
+    while ((tmp = config_pop(cf, "SOCKS5Proxy"))) {
+        listen_add("SOCKS5 proxy", socksd_list, tmp, gateway);
+        free(tmp);
+    }
+
+    /*
+* Accept only headers not specified on the command line.
+* Command line has higher priority.
+*/
+    while ((tmp = config_pop(cf, "Header"))) {
+        if (is_http_header(tmp)) {
+            head = get_http_header_name(tmp);
+            if (!hlist_in(header_list, head))
+                header_list = hlist_add(header_list, head, get_http_header_value(tmp),
+                    HLIST_ALLOC, HLIST_NOALLOC);
+            free(head);
+        } else
+            syslog(LOG_ERR, "Invalid header format: %s\n", tmp);
+
+        free(tmp);
+    }
+
+    /*
+* Add the rest of parent proxies.
+*/
+    while ((tmp = config_pop(cf, "Proxy"))) {
+        parent_add(tmp, 0);
+        free(tmp);
+    }
+
+    /*
+* No ACLs on the command line? Use config file.
+*/
+    if ((*rules) == NULL) {
+        list = cf->options;
+        while (list) {
+            if (!((*i) =strcasecmp("Allow", list->key)) || !strcasecmp("Deny", list->key))
+                if (!acl_add(rules, list->value, (*i) ? ACL_DENY : ACL_ALLOW))
+                    myexit(1);
+            list = list->next;
+        }
+
+        while ((tmp = config_pop(cf, "Allow")))
+            free(tmp);
+        while ((tmp = config_pop(cf, "Deny")))
+            free(tmp);
+    }
+
+    /*
+* Single options.
+*/
+    CFG_DEFAULT(cf, "Auth", cauth, MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "Domain", cdomain, MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "Password", cpassword, MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "PassNTLMv2", cpassntlm2, MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "PassNT", cpassnt, MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "PassLM", cpasslm, MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "Username", cuser, MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "Workstation", cworkstation, MINIBUF_SIZE);
+
+    tmp = new(MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "Flags", tmp, MINIBUF_SIZE);
+    if (!(*cflags))
+        (*cflags) = swap32(strtoul(tmp, NULL, 0));
+    free(tmp);
+
+    tmp = new(MINIBUF_SIZE);
+    CFG_DEFAULT(cf, "ISAScannerSize", tmp, MINIBUF_SIZE);
+    if (!scanner_plugin_maxsize && strlen(tmp)) {
+        scanner_plugin = 1;
+        scanner_plugin_maxsize = atoi(tmp);
+    }
+    free(tmp);
+
+    while ((tmp = config_pop(cf, "NoProxy"))) {
+        if (strlen(tmp)) {
+            noproxy_list = noproxy_add(noproxy_list, tmp);
+        }
+        free(tmp);
+    }
+
+    while ((tmp = config_pop(cf, "SOCKS5Users"))) {
+        head = strchr(tmp, ':');
+        if (!head) {
+            syslog(LOG_ERR, "Invalid username:password format for SOCKS5User: %s\n", tmp);
+        } else {
+            head[0] = 0;
+            users_list = hlist_add(users_list, tmp, head+1, HLIST_ALLOC, HLIST_ALLOC);
+        }
+    }
+
+
+    /*
+* Add User-Agent matching patterns.
+*/
+    while ((tmp = config_pop(cf, "ISAScannerAgent"))) {
+        scanner_plugin = 1;
+        if (!scanner_plugin_maxsize)
+            scanner_plugin_maxsize = 1;
+
+        if (((*i) = strlen(tmp))) {
+            head = new((*i) + 3);
+            snprintf(head, (*i) + 3, "*%s*", tmp);
+            scanner_agent_list = plist_add(scanner_agent_list, 0, head);
+        }
+        free(tmp);
+    }
+
+    /*
+* Print out unused/unknown options.
+*/
+    list = cf->options;
+    while (list) {
+        syslog(LOG_INFO, "Ignoring config file option: %s\n", list->key);
+        list = list->next;
+    }
 }
 
 void print_help(char *const *argv) {
