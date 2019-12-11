@@ -78,6 +78,8 @@ void parse_config(char *tmp, char *head, const char *cpassword, const char *cpas
                   const char *cauth, hlist_t list, int gateway, const struct config_s *cf, int *i, int *cflags,
                   plist_t *tunneld_list, plist_t *proxyd_list, plist_t *socksd_list, plist_t *rules);
 
+void set_workstation_default(const char *cworkstation);
+
 int quit = 0;					/* sighandler() */
 int ntlmbasic = 0;				/* forward_request() */
 int serialize = 0;
@@ -951,22 +953,11 @@ int main(int argc, char **argv) {
 	if (!interactivehash && !magic_detect && !proxyd_list)
 		croak("No proxy service ports were successfully opened.\n", interactivepwd);
 
-	/*
-	 * Set default value for the workstation. Hostname if possible.
-	 */
-	if (!strlen(cworkstation)) {
-#if config_gethostname == 1
-		gethostname(cworkstation, MINIBUF_SIZE);
-#endif
-		if (!strlen(cworkstation))
-			strlcpy(cworkstation, "cntlm", MINIBUF_SIZE);
+	set_workstation_default(cworkstation);
 
-		syslog(LOG_INFO, "Workstation name used: %s\n", cworkstation);
-	}
-
-	/*
-	 * Parse selected NTLM hash combination.
-	 */
+    /*
+     * Parse selected NTLM hash combination.
+     */
 	if (strlen(cauth)) {
 		if (!strcasecmp("ntlm", cauth)) {
 			g_creds->hashnt = 1;
@@ -1435,6 +1426,21 @@ bailout:
 	plist_free(parent_list);
 
 	exit(0);
+}
+
+void set_workstation_default(const char *cworkstation) {
+/*
+ * Set default value for the workstation. Hostname if possible.
+ */
+    if (!strlen(cworkstation)) {
+#if config_gethostname == 1
+        gethostname(cworkstation, MINIBUF_SIZE);
+#endif
+        if (!strlen(cworkstation))
+            strlcpy(cworkstation, "cntlm", MINIBUF_SIZE);
+
+        syslog(LOG_INFO, "Workstation name used: %s\n", cworkstation);
+    }
 }
 
 void parse_config(char *tmp, char *head, const char *cpassword, const char *cpassntlm2, const char *cpassnt,
