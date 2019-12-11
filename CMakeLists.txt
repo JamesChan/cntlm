@@ -14,7 +14,7 @@ set(SRCS
     config.c
     config.h
     socket.c socket.h
-    acl.o
+    acl.c
     acl.h
     auth.c
     auth.h
@@ -32,4 +32,5 @@ set(SRCS
 
 add_executable(${PROJECT_NAME} ${SRCS})
 target_compile_definitions(${PROJECT_NAME} PRIVATE -D__BSD_VISIBLE -D_ALL_SOURCE -D_XOPEN_SOURCE=600 -D_POSIX_C_SOURCE=200112 -D_ISOC99_SOURCE -D_REENTRANT -D_BSD_SOURCE -DVERSION=\"0.94\")
-
+add_custom_target(config ALL COMMAND ./configure WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+add_dependencies(${PROJECT_NAME} config)
