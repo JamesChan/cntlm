@@ -967,7 +967,6 @@ int main(int argc, char **argv) {
 	}
 
     get_password_from_user(cpassword, &termold, &termnew, interactivepwd, interactivehash, magic_detect);
-//TODO: here i should be removed
 
     /*
      * Convert optional PassNT, PassLM and PassNTLMv2 strings to hashes
