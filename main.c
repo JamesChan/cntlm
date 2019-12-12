@@ -72,20 +72,20 @@ int debug = 0;					/* all debug printf's and possibly external modules */
 struct auth_s *g_creds = NULL;			/* throughout the whole module */
 
 void print_help(char *const *argv);
-
 void parse_config(char *tmp, char *head, const char *cpassword, const char *cpassntlm2, const char *cpassnt,
                   const char *cpasslm, const char *cuser, const char *cdomain, const char *cworkstation,
                   const char *cauth, hlist_t list, int gateway, const struct config_s *cf, int *cflags,
                   plist_t *tunneld_list, plist_t *proxyd_list, plist_t *socksd_list, plist_t *rules);
-
 void set_workstation_default(const char *cworkstation);
-
 void parse_ntlm_hash_combination(const char *cauth);
-
 int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew,
                            int interactivepwd, int interactivehash, const char *magic_detect);
-
 void add_self_into_parent(int argc, char *const *argv, char **tmp);
+void reborn_as_daemon(int asdaemon);
+void reinit_syslog(int asdaemon);
+void change_uid(const char *cuid, struct passwd *pw, int nuid, int ngid);
+
+void create_pidfile(char *tmp, const char *cpidfile, int w, int cd);
 
 int quit = 0;					/* sighandler() */
 int ntlmbasic = 0;				/* forward_request() */
@@ -1077,107 +1077,12 @@ int main(int argc, char **argv) {
 		myexit(1);
 	}
 
-	/*
-	 * Ok, we are ready to rock. If daemon mode was requested,
-	 * fork and die. The child will not be group leader anymore
-	 * and can thus create a new session for itself and detach
-	 * from the controlling terminal.
-	 */
-	if (asdaemon) {
-		if (debug)
-			printf("Forking into background as requested.\n");
+    reborn_as_daemon(asdaemon);
+    reinit_syslog(asdaemon);
+    change_uid(cuid, pw, nuid, ngid);
+    create_pidfile(tmp, cpidfile, w, cd);
 
-		i = fork();
-		if (i == -1) {
-			perror("Fork into background failed");		/* fork failed */
-			myexit(1);
-		} else if (i)
-			myexit(0);					/* parent */
-
-		setsid();
-		umask(0);
-		w = chdir("/");
-		i = open("/dev/null", O_RDWR);
-		if (i >= 0) {
-			dup2(i, 0);
-			dup2(i, 1);
-			dup2(i, 2);
-			if (i > 2)
-				close(i);
-		}
-	}
-
-	/*
-	 * Reinit syslog logging to include our PID, after forking
-	 * it is going to be OK
-	 */
-	if (asdaemon) {
-		openlog("cntlm", LOG_CONS | LOG_PID, LOG_DAEMON);
-		syslog(LOG_INFO, "Daemon ready");
-	} else {
-		openlog("cntlm", LOG_CONS | LOG_PID | LOG_PERROR, LOG_DAEMON);
-		syslog(LOG_INFO, "Cntlm ready, staying in the foreground");
-	}
-
-	/*
-	 * Check and change UID.
-	 */
-	if (strlen(cuid)) {
-		if (getuid() && geteuid()) {
-			syslog(LOG_WARNING, "No root privileges; keeping identity %d:%d\n", getuid(), getgid());
-		} else {
-			if (isdigit(cuid[0])) {
-				nuid = atoi(cuid);
-				ngid = nuid;
-				if (nuid <= 0) {
-					syslog(LOG_ERR, "Numerical uid parameter invalid\n");
-					myexit(1);
-				}
-			} else {
-				pw = getpwnam(cuid);
-				if (!pw || !pw->pw_uid) {
-					syslog(LOG_ERR, "Username %s in -U is invalid\n", cuid);
-					myexit(1);
-				}
-				nuid = pw->pw_uid;
-				ngid = pw->pw_gid;
-			}
-			setgid(ngid);
-			i = setuid(nuid);
-			syslog(LOG_INFO, "Changing uid:gid to %d:%d - %s\n", nuid, ngid, strerror(errno));
-			if (i) {
-				syslog(LOG_ERR, "Terminating\n");
-				myexit(1);
-			}
-		}
-	}
-
-	/*
-	 * PID file requested? Try to create one (it must not exist).
-	 * If we fail, exit with error.
-	 */
-	if (strlen(cpidfile)) {
-		int len;
-
-		umask(0);
-		cd = open(cpidfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if (cd < 0) {
-			syslog(LOG_ERR, "Error creating a new PID file\n");
-			myexit(1);
-		}
-
-		tmp = new(50);
-		snprintf(tmp, 50, "%d\n", getpid());
-		w = write(cd, tmp, (len = strlen(tmp)));
-		if (w != len) {
-			syslog(LOG_ERR, "Error writing to the PID file\n");
-			myexit(1);
-		}
-		free(tmp);
-		close(cd);
-	}
-
-	/*
+    /*
 	 * Change the handler for signals recognized as clean shutdown.
 	 * When the handler is called (termination request), it signals
 	 * this news by adding 1 to the global quit variable.
@@ -1379,6 +1284,113 @@ bailout:
 	plist_free(parent_list);
 
 	exit(0);
+}
+
+void create_pidfile(char *tmp, const char *cpidfile, int w, int cd) {/*
+ * PID file requested? Try to create one (it must not exist).
+ * If we fail, exit with error.
+ */
+    if (strlen(cpidfile)) {
+        int len;
+
+        umask(0);
+        cd = open(cpidfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (cd < 0) {
+            syslog(LOG_ERR, "Error creating a new PID file\n");
+            myexit(1);
+        }
+
+        tmp = new(50);
+        snprintf(tmp, 50, "%d\n", getpid());
+        w = write(cd, tmp, (len = strlen(tmp)));
+        if (w != len) {
+            syslog(LOG_ERR, "Error writing to the PID file\n");
+            myexit(1);
+        }
+        free(tmp);
+        close(cd);
+    }
+}
+
+void change_uid(const char *cuid, struct passwd *pw, int nuid, int ngid) {/*
+ * Check and change UID.
+ */
+    if (strlen(cuid)) {
+        if (getuid() && geteuid()) {
+            syslog(LOG_WARNING, "No root privileges; keeping identity %d:%d\n", getuid(), getgid());
+        } else {
+            if (isdigit(cuid[0])) {
+                nuid = atoi(cuid);
+                ngid = nuid;
+                if (nuid <= 0) {
+                    syslog(LOG_ERR, "Numerical uid parameter invalid\n");
+                    myexit(1);
+                }
+            } else {
+                pw = getpwnam(cuid);
+                if (!pw || !pw->pw_uid) {
+                    syslog(LOG_ERR, "Username %s in -U is invalid\n", cuid);
+                    myexit(1);
+                }
+                nuid = pw->pw_uid;
+                ngid = pw->pw_gid;
+            }
+            setgid(ngid);
+            int i = setuid(nuid);
+            syslog(LOG_INFO, "Changing uid:gid to %d:%d - %s\n", nuid, ngid, strerror(errno));
+            if (i) {
+                syslog(LOG_ERR, "Terminating\n");
+                myexit(1);
+            }
+        }
+    }
+    return;
+}
+
+void reinit_syslog(int asdaemon) {/*
+ * Reinit syslog logging to include our PID, after forking
+ * it is going to be OK
+ */
+    if (asdaemon) {
+        openlog("cntlm", LOG_CONS | LOG_PID, LOG_DAEMON);
+        syslog(LOG_INFO, "Daemon ready");
+    } else {
+        openlog("cntlm", LOG_CONS | LOG_PID | LOG_PERROR, LOG_DAEMON);
+        syslog(LOG_INFO, "Cntlm ready, staying in the foreground");
+    }
+}
+
+void reborn_as_daemon(int asdaemon) {
+    int w, i;/*
+     * Ok, we are ready to rock. If daemon mode was requested,
+     * fork and die. The child will not be group leader anymore
+     * and can thus create a new session for itself and detach
+     * from the controlling terminal.
+     */
+    if (asdaemon) {
+        if (debug)
+            printf("Forking into background as requested.\n");
+
+        i = fork();
+        if (i == -1) {
+            perror("Fork into background failed");		/* fork failed */
+            myexit(1);
+        } else if (i)
+            myexit(0);					/* parent */
+
+        setsid();
+        umask(0);
+        w = chdir("/");
+        i = open("/dev/null", O_RDWR);
+        if (i >= 0) {
+            dup2(i, 0);
+            dup2(i, 1);
+            dup2(i, 2);
+            if (i > 2)
+                close(i);
+        }
+    }
+    return;
 }
 
 void add_self_into_parent(int argc, char *const *argv, char **tmp) {/*
