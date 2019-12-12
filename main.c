@@ -75,15 +75,17 @@ void print_help(char *const *argv);
 
 void parse_config(char *tmp, char *head, const char *cpassword, const char *cpassntlm2, const char *cpassnt,
                   const char *cpasslm, const char *cuser, const char *cdomain, const char *cworkstation,
-                  const char *cauth, hlist_t list, int gateway, const struct config_s *cf, int *i, int *cflags,
+                  const char *cauth, hlist_t list, int gateway, const struct config_s *cf, int *cflags,
                   plist_t *tunneld_list, plist_t *proxyd_list, plist_t *socksd_list, plist_t *rules);
 
 void set_workstation_default(const char *cworkstation);
 
 void parse_ntlm_hash_combination(const char *cauth);
 
-int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew, int i,
+int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew,
                            int interactivepwd, int interactivehash, const char *magic_detect);
+
+void add_self_into_parent(int argc, char *const *argv, char **tmp);
 
 int quit = 0;					/* sighandler() */
 int ntlmbasic = 0;				/* forward_request() */
@@ -891,7 +893,7 @@ int main(int argc, char **argv) {
 		printf(" windows/cygwin port");
 #endif
 		printf(".\nCommand line: ");
-		for (i = 0; i < argc; ++i)
+		for (int i = 0; i < argc; ++i)
 			printf("%s ", argv[i]);
 		printf("\n");
 	}
@@ -904,19 +906,11 @@ int main(int argc, char **argv) {
 		free(myconfig);
 	}
 
-	/*
-	 * More arguments on the command-line? Must be proxies.
-	 */
-	i = optind;
-	while (i < argc) {
-		tmp = strchr(argv[i], ':');
-		parent_add(argv[i], !tmp && i+1 < argc ? atoi(argv[i+1]) : 0);
-		i += (!tmp ? 2 : 1);
-	}
+    add_self_into_parent(argc, argv, &tmp);
 
-	/*
-	 * No configuration file yet? Load the default.
-	 */
+    /*
+     * No configuration file yet? Load the default.
+     */
 #ifdef SYSCONFDIR
 	if (!cf) {
 #ifdef __CYGWIN__
@@ -947,8 +941,7 @@ int main(int argc, char **argv) {
 	 */
 	if (cf) {
         parse_config(tmp, head, cpassword, cpassntlm2, cpassnt, cpasslm, cuser, cdomain, cworkstation, cauth, list,
-                     gateway, cf, &i,
-                     &cflags, &tunneld_list, &proxyd_list, &socksd_list, &rules);
+                     gateway, cf, &cflags, &tunneld_list, &proxyd_list, &socksd_list, &rules);
     }
 
 	config_close(cf);
@@ -974,7 +967,8 @@ int main(int argc, char **argv) {
 		g_creds->flags = cflags;
 	}
 
-    i = get_password_from_user(cpassword, &termold, &termnew, i, interactivepwd, interactivehash, magic_detect);
+    i = get_password_from_user(cpassword, &termold, &termnew, interactivepwd, interactivehash, magic_detect);
+//TODO: here i should be removed
 
     /*
      * Convert optional PassNT, PassLM and PassNTLMv2 strings to hashes
@@ -1387,11 +1381,24 @@ bailout:
 	exit(0);
 }
 
-int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew, int i,
+void add_self_into_parent(int argc, char *const *argv, char **tmp) {/*
+ * More arguments on the command-line? Must be proxies.
+ */
+    int i = optind;
+    while (i < argc) {
+        (*tmp) = strchr(argv[i], ':');
+        parent_add(argv[i], !(*tmp) && i + 1 < argc ? atoi(argv[i + 1]) : 0);
+        i += (!(*tmp) ? 2 : 1);
+    }
+}
+
+int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew,
                            int interactivepwd, int interactivehash, const char *magic_detect) {
     char *tmp;/*
      * Last chance to get password from the user
      */
+    int i;
+
     if (interactivehash || magic_detect || (interactivepwd && !ntlmbasic)) {
         printf("Password: ");
         tcgetattr(0, termold);
@@ -1459,7 +1466,7 @@ void set_workstation_default(const char *cworkstation) {
 
 void parse_config(char *tmp, char *head, const char *cpassword, const char *cpassntlm2, const char *cpassnt,
                   const char *cpasslm, const char *cuser, const char *cdomain, const char *cworkstation,
-                  const char *cauth, hlist_t list, int gateway, const struct config_s *cf, int *i, int *cflags,
+                  const char *cauth, hlist_t list, int gateway, const struct config_s *cf, int *cflags,
                   plist_t *tunneld_list, plist_t *proxyd_list, plist_t *socksd_list, plist_t *rules) {/*
                    * Check if gateway mode is requested before actually binding any ports.
                    */
@@ -1533,8 +1540,9 @@ void parse_config(char *tmp, char *head, const char *cpassword, const char *cpas
     if ((*rules) == NULL) {
         list = cf->options;
         while (list) {
-            if (!((*i) =strcasecmp("Allow", list->key)) || !strcasecmp("Deny", list->key))
-                if (!acl_add(rules, list->value, (*i) ? ACL_DENY : ACL_ALLOW))
+            int i;
+            if (!(i = strcasecmp("Allow", list->key)) || !strcasecmp("Deny", list->key))
+                if (!acl_add(rules, list->value, i ? ACL_DENY : ACL_ALLOW))
                     myexit(1);
             list = list->next;
         }
@@ -1597,9 +1605,10 @@ void parse_config(char *tmp, char *head, const char *cpassword, const char *cpas
         if (!scanner_plugin_maxsize)
             scanner_plugin_maxsize = 1;
 
-        if (((*i) = strlen(tmp))) {
-            head = new((*i) + 3);
-            snprintf(head, (*i) + 3, "*%s*", tmp);
+        int i;
+        if ((i = strlen(tmp))) {
+            head = new(i + 3);
+            snprintf(head, i + 3, "*%s*", tmp);
             scanner_agent_list = plist_add(scanner_agent_list, 0, head);
         }
         free(tmp);
