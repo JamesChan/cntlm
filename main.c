@@ -78,13 +78,12 @@ void parse_config(char *tmp, char *head, const char *cpassword, const char *cpas
                   plist_t *tunneld_list, plist_t *proxyd_list, plist_t *socksd_list, plist_t *rules);
 void set_workstation_default(const char *cworkstation);
 void parse_ntlm_hash_combination(const char *cauth);
-int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew,
+void get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew,
                            int interactivepwd, int interactivehash, const char *magic_detect);
 void add_self_into_parent(int argc, char *const *argv, char **tmp);
 void reborn_as_daemon(int asdaemon);
 void reinit_syslog(int asdaemon);
 void change_uid(const char *cuid, struct passwd *pw, int nuid, int ngid);
-
 void create_pidfile(char *tmp, const char *cpidfile, int w, int cd);
 
 int quit = 0;					/* sighandler() */
@@ -967,7 +966,7 @@ int main(int argc, char **argv) {
 		g_creds->flags = cflags;
 	}
 
-    i = get_password_from_user(cpassword, &termold, &termnew, interactivepwd, interactivehash, magic_detect);
+    get_password_from_user(cpassword, &termold, &termnew, interactivepwd, interactivehash, magic_detect);
 //TODO: here i should be removed
 
     /*
@@ -1404,13 +1403,11 @@ void add_self_into_parent(int argc, char *const *argv, char **tmp) {/*
     }
 }
 
-int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew,
+void get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew,
                            int interactivepwd, int interactivehash, const char *magic_detect) {
     char *tmp;/*
      * Last chance to get password from the user
      */
-    int i;
-
     if (interactivehash || magic_detect || (interactivepwd && !ntlmbasic)) {
         printf("Password: ");
         tcgetattr(0, termold);
@@ -1419,7 +1416,7 @@ int get_password_from_user(char *cpassword, struct termios *termold, struct term
         tcsetattr(0, TCSADRAIN, termnew);
         tmp = fgets(cpassword, MINIBUF_SIZE, stdin);
         tcsetattr(0, TCSADRAIN, termold);
-        i = strlen(cpassword) - 1;
+        int i = strlen(cpassword) - 1;
         if (cpassword[i] == '\n') {
             cpassword[i] = 0;
             if (cpassword[i - 1] == '\r')
@@ -1427,7 +1424,7 @@ int get_password_from_user(char *cpassword, struct termios *termold, struct term
         }
         printf("\n");
     }
-    return i;
+    return;
 }
 
 void parse_ntlm_hash_combination(const char *cauth) {/*
