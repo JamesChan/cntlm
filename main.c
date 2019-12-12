@@ -80,6 +80,11 @@ void parse_config(char *tmp, char *head, const char *cpassword, const char *cpas
 
 void set_workstation_default(const char *cworkstation);
 
+void parse_ntlm_hash_combination(const char *cauth);
+
+int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew, int i,
+                           int interactivepwd, int interactivehash, const char *magic_detect);
+
 int quit = 0;					/* sighandler() */
 int ntlmbasic = 0;				/* forward_request() */
 int serialize = 0;
@@ -681,7 +686,7 @@ int main(int argc, char **argv) {
 	pthread_attr_t pattr;
 	pthread_t pthr;
 	hlist_t list;
-	int i, w;
+	int w;
 
 	int cd = 0;
 	int help = 0;
@@ -723,6 +728,7 @@ int main(int argc, char **argv) {
 	syslog(LOG_INFO, "Starting cntlm version " VERSION " for LITTLE endian\n");
 #endif
 
+    int i;
 	while ((i = getopt(argc, argv, ":-:T:a:c:d:fghIl:p:r:su:vw:A:BD:F:G:HL:M:N:O:P:R:S:U:")) != -1) {
 		switch (i) {
 			case 'A':
@@ -954,38 +960,9 @@ int main(int argc, char **argv) {
 		croak("No proxy service ports were successfully opened.\n", interactivepwd);
 
 	set_workstation_default(cworkstation);
+    parse_ntlm_hash_combination(cauth);
 
-    /*
-     * Parse selected NTLM hash combination.
-     */
-	if (strlen(cauth)) {
-		if (!strcasecmp("ntlm", cauth)) {
-			g_creds->hashnt = 1;
-			g_creds->hashlm = 1;
-			g_creds->hashntlm2 = 0;
-		} else if (!strcasecmp("nt", cauth)) {
-			g_creds->hashnt = 1;
-			g_creds->hashlm = 0;
-			g_creds->hashntlm2 = 0;
-		} else if (!strcasecmp("lm", cauth)) {
-			g_creds->hashnt = 0;
-			g_creds->hashlm = 1;
-			g_creds->hashntlm2 = 0;
-		} else if (!strcasecmp("ntlmv2", cauth)) {
-			g_creds->hashnt = 0;
-			g_creds->hashlm = 0;
-			g_creds->hashntlm2 = 1;
-		} else if (!strcasecmp("ntlm2sr", cauth)) {
-			g_creds->hashnt = 2;
-			g_creds->hashlm = 0;
-			g_creds->hashntlm2 = 0;
-		} else {
-			syslog(LOG_ERR, "Unknown NTLM auth combination.\n");
-			myexit(1);
-		}
-	}
-
-	if (socksd_list && !users_list)
+    if (socksd_list && !users_list)
 		syslog(LOG_WARNING, "SOCKS5 proxy will NOT require any authentication\n");
 
 	if (!magic_detect)
@@ -997,33 +974,15 @@ int main(int argc, char **argv) {
 		g_creds->flags = cflags;
 	}
 
-	/*
-	 * Last chance to get password from the user
-	 */
-	if (interactivehash || magic_detect || (interactivepwd && !ntlmbasic)) {
-		printf("Password: ");
-		tcgetattr(0, &termold);
-		termnew = termold;
-		termnew.c_lflag &= ~(ISIG | ECHO);
-		tcsetattr(0, TCSADRAIN, &termnew);
-		tmp = fgets(cpassword, MINIBUF_SIZE, stdin);
-		tcsetattr(0, TCSADRAIN, &termold);
-		i = strlen(cpassword) - 1;
-		if (cpassword[i] == '\n') {
-			cpassword[i] = 0;
-			if (cpassword[i - 1] == '\r')
-				cpassword[i - 1] = 0;
-		}
-		printf("\n");
-	}
+    i = get_password_from_user(cpassword, &termold, &termnew, i, interactivepwd, interactivehash, magic_detect);
 
-	/*
-	 * Convert optional PassNT, PassLM and PassNTLMv2 strings to hashes
-	 * unless plaintext pass was used, which has higher priority.
-	 *
-	 * If plain password is present, calculate its NT and LM hashes 
-	 * and remove it from the memory.
-	 */
+    /*
+     * Convert optional PassNT, PassLM and PassNTLMv2 strings to hashes
+     * unless plaintext pass was used, which has higher priority.
+     *
+     * If plain password is present, calculate its NT and LM hashes
+     * and remove it from the memory.
+     */
 	if (!strlen(cpassword)) {
 		if (strlen(cpassntlm2)) {
 			tmp = scanmem(cpassntlm2, 8);
@@ -1426,6 +1385,61 @@ bailout:
 	plist_free(parent_list);
 
 	exit(0);
+}
+
+int get_password_from_user(char *cpassword, struct termios *termold, struct termios *termnew, int i,
+                           int interactivepwd, int interactivehash, const char *magic_detect) {
+    char *tmp;/*
+     * Last chance to get password from the user
+     */
+    if (interactivehash || magic_detect || (interactivepwd && !ntlmbasic)) {
+        printf("Password: ");
+        tcgetattr(0, termold);
+        (*termnew) = (*termold);
+        (*termnew).c_lflag &= ~(ISIG | ECHO);
+        tcsetattr(0, TCSADRAIN, termnew);
+        tmp = fgets(cpassword, MINIBUF_SIZE, stdin);
+        tcsetattr(0, TCSADRAIN, termold);
+        i = strlen(cpassword) - 1;
+        if (cpassword[i] == '\n') {
+            cpassword[i] = 0;
+            if (cpassword[i - 1] == '\r')
+                cpassword[i - 1] = 0;
+        }
+        printf("\n");
+    }
+    return i;
+}
+
+void parse_ntlm_hash_combination(const char *cauth) {/*
+ * Parse selected NTLM hash combination.
+ */
+    if (strlen(cauth)) {
+        if (!strcasecmp("ntlm", cauth)) {
+            g_creds->hashnt = 1;
+            g_creds->hashlm = 1;
+            g_creds->hashntlm2 = 0;
+        } else if (!strcasecmp("nt", cauth)) {
+            g_creds->hashnt = 1;
+            g_creds->hashlm = 0;
+            g_creds->hashntlm2 = 0;
+        } else if (!strcasecmp("lm", cauth)) {
+            g_creds->hashnt = 0;
+            g_creds->hashlm = 1;
+            g_creds->hashntlm2 = 0;
+        } else if (!strcasecmp("ntlmv2", cauth)) {
+            g_creds->hashnt = 0;
+            g_creds->hashlm = 0;
+            g_creds->hashntlm2 = 1;
+        } else if (!strcasecmp("ntlm2sr", cauth)) {
+            g_creds->hashnt = 2;
+            g_creds->hashlm = 0;
+            g_creds->hashntlm2 = 0;
+        } else {
+            syslog(LOG_ERR, "Unknown NTLM auth combination.\n");
+            myexit(1);
+        }
+    }
 }
 
 void set_workstation_default(const char *cworkstation) {
